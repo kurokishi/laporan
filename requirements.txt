@@ -1,7 +1,8 @@
-pandas
+pandas>=1.5
 numpy
 streamlit
 plotly
 openpyxl
-camelot-py
-ghostscript
+camelot-py[cv]    # gunakan [cv] jika ingin dependensi tambahan untuk akurasi
+pdfplumber        # fallback/extractor alternatif
+ghostscript       # di beberapa OS ghostscript harus diinstall secara sistem (apt/brew/choco)
