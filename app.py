@@ -479,7 +479,8 @@ def main():
                 "temp_file.xlsx",
                 company_name or uploaded_file.name.split('.')[0],
                 sheet_name=int(sheet_name) if sheet_name.isdigit() else sheet_name,
-                metric_column )
+                metric_column 
+            )
     
     st.sidebar.markdown("---")
     st.sidebar.info("""
