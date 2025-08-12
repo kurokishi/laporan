@@ -6,6 +6,4 @@ yfinance
 openpyxl
 xlrd 
 matplotlib
-io
-base64
 seaborn
