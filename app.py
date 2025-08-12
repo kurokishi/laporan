@@ -474,12 +474,12 @@ def main():
             with open("temp_file.xlsx", "wb") as f:
                 f.write(uploaded_file.getbuffer())
             
-            # Run analysis
+            # Run analysis - PERBAIKAN DI SINI
             analyze_company(
                 "temp_file.xlsx",
                 company_name or uploaded_file.name.split('.')[0],
-                sheet_name=int(sheet_name) if sheet_name.isdigit() else sheet_name,
-                metric_column 
+                int(sheet_name) if sheet_name.isdigit() else sheet_name,
+                metric_column
             )
     
     st.sidebar.markdown("---")
