@@ -1,8 +1,7 @@
+streamlit>=1.20
 pandas>=1.5
 numpy
-streamlit
 plotly
+yfinance
 openpyxl
-camelot-py[cv]    # gunakan [cv] jika ingin dependensi tambahan untuk akurasi
-pdfplumber        # fallback/extractor alternatif
-ghostscript       # di beberapa OS ghostscript harus diinstall secara sistem (apt/brew/choco)
+xlrd  # note: for some .xls files you may need xlrd<2.0; if issues occur, install xlrd==1.2.0
