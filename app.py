@@ -4,81 +4,67 @@ import numpy as np
 import seaborn as sns
 from pathlib import Path
 import warnings
+import streamlit as st
+import io
+import base64
+
 warnings.filterwarnings('ignore')
 
 class IDXFinancialAnalyzer:
     def __init__(self, file_path, company_name=None):
-        """
-        Analyzer untuk laporan keuangan dari IDX
-        
-        Parameters:
-        file_path (str): Path ke file Excel (.xls/.xlsx)
-        company_name (str): Nama perusahaan (opsional)
-        """
         self.file_path = Path(file_path)
         self.company_name = company_name or self.file_path.stem
         self.data = None
         self.processed_data = None
+        self.df_analysis = None
+        self.financial_ratios = None
         
     def load_data(self, sheet_name=0):
-        """Load data dari file Excel IDX"""
         try:
-            # Coba baca dengan berbagai format
             if self.file_path.suffix.lower() == '.xls':
                 self.data = pd.read_excel(self.file_path, sheet_name=sheet_name, engine='xlrd')
             else:
                 self.data = pd.read_excel(self.file_path, sheet_name=sheet_name, engine='openpyxl')
             
-            print(f"✅ Data berhasil dimuat: {self.data.shape[0]} baris, {self.data.shape[1]} kolom")
+            st.success(f"✅ Data berhasil dimuat: {self.data.shape[0]} baris, {self.data.shape[1]} kolom")
             return True
             
         except Exception as e:
-            print(f"❌ Error loading file: {e}")
+            st.error(f"❌ Error loading file: {e}")
             return False
     
     def preview_data(self, rows=10):
-        """Preview struktur data"""
         if self.data is None:
-            print("❌ Data belum dimuat. Jalankan load_data() terlebih dahulu.")
+            st.warning("❌ Data belum dimuat. Jalankan load_data() terlebih dahulu.")
             return
         
-        print("\n📊 PREVIEW DATA:")
-        print("="*50)
-        print(f"Shape: {self.data.shape}")
-        print(f"Columns: {list(self.data.columns)}")
-        print("\nFirst few rows:")
-        print(self.data.head(rows))
+        st.subheader("📊 Preview Data")
+        st.write(f"**Shape:** {self.data.shape}")
+        st.write(f"**Columns:** {list(self.data.columns)}")
         
-        # Deteksi kolom tahun
+        st.write("\n**Data Preview:**")
+        st.dataframe(self.data.head(rows))
+        
         year_cols = [col for col in self.data.columns if str(col).isdigit() and len(str(col)) == 4]
-        print(f"\n📅 Detected year columns: {year_cols}")
+        st.info(f"📅 Detected year columns: {year_cols}")
     
     def standardize_data(self, metric_column='Keterangan', auto_detect=True):
-        """
-        Standardisasi format data IDX
-        
-        Parameters:
-        metric_column (str): Nama kolom yang berisi deskripsi metric
-        auto_detect (bool): Otomatis deteksi kolom tahun
-        """
         if self.data is None:
-            print("❌ Data belum dimuat.")
+            st.warning("❌ Data belum dimuat.")
             return False
         
         df = self.data.copy()
         
-        # Auto-detect metric column jika tidak ditemukan
         if metric_column not in df.columns:
             possible_cols = [col for col in df.columns if any(keyword in str(col).lower() 
                            for keyword in ['keterangan', 'description', 'item', 'metric'])]
             if possible_cols:
                 metric_column = possible_cols[0]
-                print(f"📝 Using metric column: {metric_column}")
+                st.info(f"📝 Using metric column: {metric_column}")
             else:
                 metric_column = df.columns[0]
-                print(f"⚠️ Using first column as metric: {metric_column}")
+                st.warning(f"⚠️ Using first column as metric: {metric_column}")
         
-        # Deteksi kolom tahun
         if auto_detect:
             year_cols = [col for col in df.columns if str(col).isdigit() and len(str(col)) == 4]
             year_cols.sort()
@@ -86,19 +72,15 @@ class IDXFinancialAnalyzer:
             year_cols = [col for col in df.columns if col != metric_column]
         
         if len(year_cols) < 2:
-            print(f"⚠️ Hanya ditemukan {len(year_cols)} kolom tahun. Minimal 2 tahun diperlukan.")
+            st.warning(f"⚠️ Hanya ditemukan {len(year_cols)} kolom tahun. Minimal 2 tahun diperlukan.")
             return False
         
-        # Bersihkan dan konversi data numerik
         for col in year_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # Filter baris yang memiliki data valid
         df = df.dropna(subset=year_cols, how='all')
         
-        # Mapping standard metrics
         metric_mapping = {
-            # Assets
             'total aset': 'Total Assets',
             'total aktiva': 'Total Assets', 
             'kas dan setara kas': 'Cash & Equivalents',
@@ -106,8 +88,6 @@ class IDXFinancialAnalyzer:
             'piutang usaha': 'Accounts Receivable',
             'persediaan': 'Inventory',
             'aset lancar': 'Current Assets',
-            
-            # Liabilities  
             'total liabilitas': 'Total Liabilities',
             'total kewajiban': 'Total Liabilities',
             'utang usaha': 'Accounts Payable',
@@ -115,12 +95,8 @@ class IDXFinancialAnalyzer:
             'kewajiban lancar': 'Current Liabilities',
             'utang bank jangka panjang': 'Long-term Debt',
             'liabilitas jangka panjang': 'Long-term Debt',
-            
-            # Equity
             'total ekuitas': 'Total Equity',
             'modal disetor': 'Paid-in Capital',
-            
-            # Income Statement
             'pendapatan': 'Revenue',
             'penjualan': 'Revenue', 
             'beban pokok penjualan': 'Cost of Goods Sold',
@@ -129,18 +105,14 @@ class IDXFinancialAnalyzer:
             'laba sebelum pajak': 'Profit Before Tax',
             'laba bersih': 'Net Profit',
             'laba tahun berjalan': 'Net Profit',
-            
-            # Cash Flow
             'dividen': 'Dividends Paid',
             'dividen dibayar': 'Dividends Paid'
         }
         
-        # Standardisasi nama metric
         df['Standard_Metric'] = df[metric_column].str.lower().str.strip()
         for key, value in metric_mapping.items():
             df.loc[df['Standard_Metric'].str.contains(key, na=False), 'Standard_Metric'] = value
         
-        # Siapkan data final
         self.processed_data = {
             'metrics': df['Standard_Metric'].tolist(),
             'original_metrics': df[metric_column].tolist(),
@@ -148,7 +120,6 @@ class IDXFinancialAnalyzer:
             'data': df[year_cols].values
         }
         
-        # Buat DataFrame terstruktur
         structured_data = []
         for i, metric in enumerate(self.processed_data['metrics']):
             row = {'Metric': metric, 'Original': self.processed_data['original_metrics'][i]}
@@ -158,13 +129,12 @@ class IDXFinancialAnalyzer:
         
         self.df_analysis = pd.DataFrame(structured_data)
         
-        print(f"✅ Data terstandarisasi: {len(self.df_analysis)} metrics, {len(year_cols)} years")
+        st.success(f"✅ Data terstandarisasi: {len(self.df_analysis)} metrics, {len(year_cols)} years")
         return True
     
     def calculate_financial_ratios(self):
-        """Hitung rasio keuangan utama"""
         if self.df_analysis is None:
-            print("❌ Data belum diproses.")
+            st.warning("❌ Data belum diproses.")
             return None
         
         df = self.df_analysis.copy()
@@ -175,22 +145,19 @@ class IDXFinancialAnalyzer:
         for year in years:
             year_ratios = {}
             
-            # Helper function untuk ambil nilai
             def get_value(metric_name):
                 mask = df['Metric'].str.contains(metric_name, case=False, na=False)
                 values = df.loc[mask, year]
                 return values.iloc[0] if len(values) > 0 and pd.notna(values.iloc[0]) else 0
             
-            # Liquidity Ratios
             current_assets = get_value('Current Assets')
             cash = get_value('Cash & Equivalents') 
             current_liab = get_value('Current Liabilities')
             
             if current_liab != 0:
                 year_ratios['Current Ratio'] = current_assets / current_liab
-                year_ratios['Quick Ratio'] = cash / current_liab
+                year_ratios['Quick Ratio'] = (cash) / current_liab
             
-            # Profitability Ratios
             revenue = get_value('Revenue')
             gross_profit = get_value('Gross Profit')
             net_profit = get_value('Net Profit')
@@ -207,7 +174,6 @@ class IDXFinancialAnalyzer:
             if total_equity != 0:
                 year_ratios['ROE %'] = (net_profit / total_equity) * 100
             
-            # Leverage Ratios
             total_liab = get_value('Total Liabilities')
             long_term_debt = get_value('Long-term Debt')
             
@@ -222,194 +188,147 @@ class IDXFinancialAnalyzer:
         self.financial_ratios = pd.DataFrame(ratios).T
         return self.financial_ratios
     
-    def create_visualizations(self, save_charts=True):
-        """Buat visualisasi analisis keuangan"""
+    def create_visualizations(self):
         if self.df_analysis is None:
-            print("❌ Data belum diproses.")
+            st.warning("❌ Data belum diproses.")
             return
         
-        # Setup plot style
         plt.style.use('seaborn-v0_8')
         sns.set_palette("husl")
         
-        fig = plt.figure(figsize=(20, 15))
-        
-        # Data preparation
         df = self.df_analysis.copy()
         years = [col for col in df.columns if str(col).isdigit()]
         
-        # 1. Key Financial Metrics Overview
-        ax1 = plt.subplot(3, 3, 1)
-        key_metrics = ['Total Assets', 'Revenue', 'Net Profit']
-        key_data = df[df['Metric'].isin(key_metrics)]
+        st.subheader("📈 Financial Visualizations")
         
-        if not key_data.empty:
-            key_data_pivot = key_data.set_index('Metric')[years]
-            key_data_pivot.T.plot(kind='bar', ax=ax1, width=0.8)
-            ax1.set_title(f'{self.company_name} - Key Financial Metrics', fontsize=12, fontweight='bold')
-            ax1.set_ylabel('Value (in thousands)')
-            ax1.tick_params(axis='x', rotation=45)
-            ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        # Tab layout
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "Key Metrics", 
+            "Profitability", 
+            "Liquidity & Debt", 
+            "Ratios"
+        ])
         
-        # 2. Profitability Trend
-        ax2 = plt.subplot(3, 3, 2)
-        profit_metrics = ['Gross Profit', 'Operating Profit', 'Net Profit']
-        profit_data = df[df['Metric'].isin(profit_metrics)]
-        
-        if not profit_data.empty:
-            profit_data_pivot = profit_data.set_index('Metric')[years]
-            profit_data_pivot.T.plot(kind='line', marker='o', ax=ax2, linewidth=2)
-            ax2.set_title('Profitability Trend', fontsize=12, fontweight='bold')
-            ax2.set_ylabel('Profit (in thousands)')
-            ax2.grid(True, alpha=0.3)
-            ax2.legend()
-        
-        # 3. Asset Composition
-        ax3 = plt.subplot(3, 3, 3)
-        latest_year = years[-1]
-        asset_metrics = ['Current Assets', 'Total Assets']
-        asset_data = df[df['Metric'].isin(asset_metrics)]
-        
-        if not asset_data.empty and len(asset_data) > 0:
-            asset_values = asset_data[latest_year].values
-            asset_labels = asset_data['Metric'].values
-            colors = plt.cm.Set3(np.linspace(0, 1, len(asset_values)))
-            ax3.pie(asset_values, labels=asset_labels, autopct='%1.1f%%', colors=colors)
-            ax3.set_title(f'Asset Composition {latest_year}', fontsize=12, fontweight='bold')
-        
-        # 4. Liquidity Analysis
-        ax4 = plt.subplot(3, 3, 4)
-        liquidity_metrics = ['Cash & Equivalents', 'Current Liabilities']
-        liquidity_data = df[df['Metric'].isin(liquidity_metrics)]
-        
-        if not liquidity_data.empty:
-            liquidity_data_pivot = liquidity_data.set_index('Metric')[years]
-            liquidity_data_pivot.T.plot(kind='bar', ax=ax4, width=0.6)
-            ax4.set_title('Liquidity Analysis', fontsize=12, fontweight='bold')
-            ax4.set_ylabel('Amount (in thousands)')
-            ax4.tick_params(axis='x', rotation=45)
-            ax4.legend()
-        
-        # 5. Debt Structure
-        ax5 = plt.subplot(3, 3, 5)
-        debt_metrics = ['Current Liabilities', 'Long-term Debt']
-        debt_data = df[df['Metric'].isin(debt_metrics)]
-        
-        if not debt_data.empty:
-            debt_data_pivot = debt_data.set_index('Metric')[years]
-            debt_data_pivot.T.plot(kind='bar', stacked=True, ax=ax5, width=0.6)
-            ax5.set_title('Debt Structure', fontsize=12, fontweight='bold')
-            ax5.set_ylabel('Debt (in thousands)')
-            ax5.tick_params(axis='x', rotation=45)
-            ax5.legend()
-        
-        # 6. Financial Ratios
-        if hasattr(self, 'financial_ratios') and self.financial_ratios is not None:
-            ax6 = plt.subplot(3, 3, 6)
-            ratio_cols = ['Current Ratio', 'Quick Ratio']
-            available_ratios = [col for col in ratio_cols if col in self.financial_ratios.columns]
+        with tab1:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("### Key Financial Metrics")
+                key_metrics = ['Total Assets', 'Revenue', 'Net Profit']
+                key_data = df[df['Metric'].isin(key_metrics)]
+                if not key_data.empty:
+                    key_data_pivot = key_data.set_index('Metric')[years]
+                    st.bar_chart(key_data_pivot.T)
             
-            if available_ratios:
-                self.financial_ratios[available_ratios].plot(kind='bar', ax=ax6, width=0.6)
-                ax6.set_title('Liquidity Ratios', fontsize=12, fontweight='bold')
-                ax6.set_ylabel('Ratio')
-                ax6.tick_params(axis='x', rotation=45)
-                ax6.axhline(y=1, color='red', linestyle='--', alpha=0.7, label='Benchmark')
-                ax6.legend()
+            with col2:
+                st.write("### Asset Composition")
+                latest_year = years[-1]
+                asset_metrics = ['Current Assets', 'Total Assets']
+                asset_data = df[df['Metric'].isin(asset_metrics)]
+                if not asset_data.empty and len(asset_data) > 0:
+                    asset_values = asset_data[latest_year].values
+                    asset_labels = asset_data['Metric'].values
+                    fig, ax = plt.subplots(figsize=(5, 5))
+                    ax.pie(asset_values, labels=asset_labels, autopct='%1.1f%%')
+                    st.pyplot(fig)
         
-        # 7. Profitability Ratios
-        if hasattr(self, 'financial_ratios') and self.financial_ratios is not None:
-            ax7 = plt.subplot(3, 3, 7)
-            margin_cols = ['Gross Margin %', 'Net Margin %']
-            available_margins = [col for col in margin_cols if col in self.financial_ratios.columns]
+        with tab2:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("### Profitability Trend")
+                profit_metrics = ['Gross Profit', 'Operating Profit', 'Net Profit']
+                profit_data = df[df['Metric'].isin(profit_metrics)]
+                if not profit_data.empty:
+                    st.line_chart(profit_data.set_index('Metric')[years].T)
             
-            if available_margins:
-                self.financial_ratios[available_margins].plot(kind='line', marker='o', ax=ax7, linewidth=2)
-                ax7.set_title('Profitability Margins', fontsize=12, fontweight='bold')
-                ax7.set_ylabel('Percentage (%)')
-                ax7.grid(True, alpha=0.3)
-                ax7.legend()
+            with col2:
+                st.write("### Profitability Growth")
+                if len(years) >= 2:
+                    growth_metrics = ['Revenue', 'Net Profit', 'Total Assets']
+                    growth_data = []
+                    for metric in growth_metrics:
+                        metric_row = df[df['Metric'] == metric]
+                        if not metric_row.empty:
+                            values = metric_row[years].iloc[0]
+                            if len(values) >= 2 and values.iloc[0] != 0:
+                                growth_rate = ((values.iloc[-1] - values.iloc[0]) / values.iloc[0]) * 100
+                                growth_data.append({'Metric': metric, 'Growth %': growth_rate})
+                    if growth_data:
+                        growth_df = pd.DataFrame(growth_data)
+                        st.bar_chart(growth_df.set_index('Metric'))
         
-        # 8. Return Ratios
-        if hasattr(self, 'financial_ratios') and self.financial_ratios is not None:
-            ax8 = plt.subplot(3, 3, 8)
-            return_cols = ['ROA %', 'ROE %']
-            available_returns = [col for col in return_cols if col in self.financial_ratios.columns]
+        with tab3:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("### Liquidity Analysis")
+                liquidity_metrics = ['Cash & Equivalents', 'Current Liabilities']
+                liquidity_data = df[df['Metric'].isin(liquidity_metrics)]
+                if not liquidity_data.empty:
+                    st.bar_chart(liquidity_data.set_index('Metric')[years].T)
             
-            if available_returns:
-                self.financial_ratios[available_returns].plot(kind='bar', ax=ax8, width=0.6)
-                ax8.set_title('Return Ratios', fontsize=12, fontweight='bold')
-                ax8.set_ylabel('Percentage (%)')
-                ax8.tick_params(axis='x', rotation=45)
-                ax8.legend()
+            with col2:
+                st.write("### Debt Structure")
+                debt_metrics = ['Current Liabilities', 'Long-term Debt']
+                debt_data = df[df['Metric'].isin(debt_metrics)]
+                if not debt_data.empty:
+                    debt_data_pivot = debt_data.set_index('Metric')[years].T
+                    debt_data_pivot['Long-term Debt'] = debt_data_pivot.get('Long-term Debt', 0)
+                    debt_data_pivot['Current Liabilities'] = debt_data_pivot.get('Current Liabilities', 0)
+                    st.bar_chart(debt_data_pivot)
         
-        # 9. Year-over-Year Growth
-        ax9 = plt.subplot(3, 3, 9)
-        if len(years) >= 2:
-            growth_metrics = ['Revenue', 'Net Profit', 'Total Assets']
-            growth_data = []
-            
-            for metric in growth_metrics:
-                metric_row = df[df['Metric'] == metric]
-                if not metric_row.empty:
-                    values = metric_row[years].iloc[0]
-                    if len(values) >= 2 and values.iloc[0] != 0:
-                        growth_rate = ((values.iloc[-1] - values.iloc[0]) / values.iloc[0]) * 100
-                        growth_data.append({'Metric': metric, 'Growth %': growth_rate})
-            
-            if growth_data:
-                growth_df = pd.DataFrame(growth_data)
-                colors = ['green' if x > 0 else 'red' for x in growth_df['Growth %']]
-                bars = ax9.bar(growth_df['Metric'], growth_df['Growth %'], color=colors, alpha=0.7)
-                ax9.set_title(f'YoY Growth ({years[0]}-{years[-1]})', fontsize=12, fontweight='bold')
-                ax9.set_ylabel('Growth Rate (%)')
-                ax9.tick_params(axis='x', rotation=45)
-                ax9.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+        with tab4:
+            if hasattr(self, 'financial_ratios') and self.financial_ratios is not None:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("### Liquidity Ratios")
+                    ratio_cols = ['Current Ratio', 'Quick Ratio']
+                    available_ratios = [col for col in ratio_cols if col in self.financial_ratios.columns]
+                    if available_ratios:
+                        st.bar_chart(self.financial_ratios[available_ratios])
                 
-                # Add value labels on bars
-                for bar, value in zip(bars, growth_df['Growth %']):
-                    height = bar.get_height()
-                    ax9.text(bar.get_x() + bar.get_width()/2., height + (0.01 * max(growth_df['Growth %'])),
-                            f'{value:.1f}%', ha='center', va='bottom', fontsize=9)
-        
-        plt.tight_layout(pad=3.0)
-        
-        if save_charts:
-            filename = f'{self.company_name}_financial_analysis.png'
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
-            print(f"📊 Charts saved as: {filename}")
-        
-        plt.show()
+                with col2:
+                    st.write("### Profitability Margins")
+                    margin_cols = ['Gross Margin %', 'Net Margin %']
+                    available_margins = [col for col in margin_cols if col in self.financial_ratios.columns]
+                    if available_margins:
+                        st.line_chart(self.financial_ratios[available_margins])
+                
+                col3, col4 = st.columns(2)
+                with col3:
+                    st.write("### Return Ratios")
+                    return_cols = ['ROA %', 'ROE %']
+                    available_returns = [col for col in return_cols if col in self.financial_ratios.columns]
+                    if available_returns:
+                        st.bar_chart(self.financial_ratios[available_returns])
+                
+                with col4:
+                    st.write("### Leverage Ratios")
+                    leverage_cols = ['Debt to Asset %', 'Debt to Equity %']
+                    available_leverage = [col for col in leverage_cols if col in self.financial_ratios.columns]
+                    if available_leverage:
+                        st.bar_chart(self.financial_ratios[available_leverage])
     
     def generate_report(self):
-        """Generate comprehensive financial analysis report"""
         if self.df_analysis is None:
-            print("❌ Data belum diproses.")
+            st.warning("❌ Data belum diproses.")
             return
         
-        print("\n" + "="*80)
-        print(f"📈 FINANCIAL ANALYSIS REPORT - {self.company_name.upper()}")
-        print("="*80)
-        
+        st.subheader(f"📈 Financial Analysis Report - {self.company_name}")
         years = [col for col in self.df_analysis.columns if str(col).isdigit()]
         
         # Key Metrics Summary
-        print(f"\n📊 KEY FINANCIAL METRICS:")
-        print("-" * 50)
+        st.write("### 📊 Key Financial Metrics")
         display_metrics = ['Total Assets', 'Revenue', 'Gross Profit', 'Net Profit', 
                          'Cash & Equivalents', 'Current Liabilities', 'Total Equity']
         
         summary_data = []
         for metric in display_metrics:
-            row_data = {'Metric': metric}
             metric_row = self.df_analysis[self.df_analysis['Metric'] == metric]
-            
             if not metric_row.empty:
+                row_data = {'Metric': metric}
                 for year in years:
                     value = metric_row[year].iloc[0]
                     row_data[year] = f"{value:,.0f}" if pd.notna(value) else "N/A"
                 
-                # Calculate change
                 if len(years) >= 2:
                     old_val = metric_row[years[0]].iloc[0]
                     new_val = metric_row[years[-1]].iloc[0]
@@ -422,46 +341,46 @@ class IDXFinancialAnalyzer:
                 summary_data.append(row_data)
         
         if summary_data:
-            summary_df = pd.DataFrame(summary_data)
-            print(summary_df.to_string(index=False))
+            st.dataframe(pd.DataFrame(summary_data))
         
         # Financial Ratios
         if hasattr(self, 'financial_ratios') and self.financial_ratios is not None:
-            print(f"\n📈 FINANCIAL RATIOS:")
-            print("-" * 50)
-            print(self.financial_ratios.round(2).to_string())
+            st.write("### 📈 Financial Ratios")
+            st.dataframe(self.financial_ratios.style.format("{:.2f}"))
         
         # Risk Analysis
-        print(f"\n⚠️ RISK INDICATORS:")
-        print("-" * 50)
+        st.write("### ⚠️ Risk Indicators")
+        col1, col2 = st.columns(2)
         
-        # Debt analysis
-        debt_data = self.df_analysis[self.df_analysis['Metric'].str.contains('Debt|Liabilities', case=False, na=False)]
-        if not debt_data.empty:
-            latest_year = years[-1]
-            total_debt = debt_data[latest_year].sum()
-            print(f"Total Debt ({latest_year}): {total_debt:,.0f}")
+        with col1:
+            st.write("**Debt Analysis**")
+            debt_data = self.df_analysis[self.df_analysis['Metric'].str.contains('Debt|Liabilities', case=False, na=False)]
+            if not debt_data.empty:
+                latest_year = years[-1]
+                total_debt = debt_data[latest_year].sum()
+                st.metric(f"Total Debt ({latest_year})", f"{total_debt:,.0f}")
         
-        # Liquidity analysis
-        cash_row = self.df_analysis[self.df_analysis['Metric'] == 'Cash & Equivalents']
-        current_liab_row = self.df_analysis[self.df_analysis['Metric'] == 'Current Liabilities']
-        
-        if not cash_row.empty and not current_liab_row.empty:
-            for year in years:
-                cash = cash_row[year].iloc[0] if not cash_row.empty else 0
-                liab = current_liab_row[year].iloc[0] if not current_liab_row.empty else 0
+        with col2:
+            st.write("**Liquidity Analysis**")
+            cash_row = self.df_analysis[self.df_analysis['Metric'] == 'Cash & Equivalents']
+            current_liab_row = self.df_analysis[self.df_analysis['Metric'] == 'Current Liabilities']
+            
+            if not cash_row.empty and not current_liab_row.empty:
+                latest_year = years[-1]
+                cash = cash_row[latest_year].iloc[0] if not cash_row.empty else 0
+                liab = current_liab_row[latest_year].iloc[0] if not current_liab_row.empty else 0
                 if liab != 0:
                     coverage = cash / liab
-                    status = "Good" if coverage > 1 else "Watch" if coverage > 0.5 else "Risk"
-                    print(f"Cash Coverage {year}: {coverage:.2f}x ({status})")
+                    status = "✅ Good" if coverage > 1 else "🔄 Adequate" if coverage > 0.5 else "❌ Risk"
+                    st.metric(f"Cash Coverage ({latest_year})", f"{coverage:.2f}x", status)
         
         # Growth Analysis
-        print(f"\n📈 GROWTH ANALYSIS:")
-        print("-" * 50)
-        
+        st.write("### 📈 Growth Analysis")
         if len(years) >= 2:
             growth_metrics = ['Revenue', 'Net Profit', 'Total Assets', 'Total Equity']
-            for metric in growth_metrics:
+            growth_cols = st.columns(len(growth_metrics))
+            
+            for i, metric in enumerate(growth_metrics):
                 metric_row = self.df_analysis[self.df_analysis['Metric'] == metric]
                 if not metric_row.empty:
                     old_val = metric_row[years[0]].iloc[0]
@@ -469,12 +388,11 @@ class IDXFinancialAnalyzer:
                     if pd.notna(old_val) and pd.notna(new_val) and old_val != 0:
                         growth = ((new_val - old_val) / old_val) * 100
                         trend = "📈" if growth > 0 else "📉"
-                        print(f"{metric}: {growth:+.1f}% {trend}")
+                        with growth_cols[i]:
+                            st.metric(f"{metric} Growth", f"{growth:+.1f}%", trend)
         
         # Investment Signals
-        print(f"\n🎯 INVESTMENT SIGNALS:")
-        print("-" * 50)
-        
+        st.write("### 🎯 Investment Signals")
         signals = []
         
         # Profitability signal
@@ -512,81 +430,66 @@ class IDXFinancialAnalyzer:
                 else:
                     signals.append("📉 Revenue declining")
         
-        for signal in signals:
-            print(signal)
-        
-        print("\n" + "="*80)
-        print("📋 Analysis completed. Review charts for detailed insights.")
-        print("="*80)
+        if signals:
+            for signal in signals:
+                st.info(signal)
+        else:
+            st.info("No significant investment signals detected")
 
-    def run_full_analysis(self, file_path, sheet_name=0, metric_column='Keterangan'):
-        """Jalankan analisis lengkap dari file Excel IDX"""
-        print(f"🚀 Starting analysis for: {self.company_name}")
-        print("-" * 50)
-        
-        # Load data
-        if not self.load_data(sheet_name):
-            return False
-        
-        # Preview data
-        self.preview_data()
-        
-        # Standardize data
-        if not self.standardize_data(metric_column):
-            return False
-        
-        # Calculate ratios
-        self.calculate_financial_ratios()
-        
-        # Generate visualizations
-        self.create_visualizations()
-        
-        # Generate report
-        self.generate_report()
-        
-        return True
-
-# ===== USAGE EXAMPLE =====
-
-def analyze_company(file_path, company_name=None, sheet_name=0, metric_column='Keterangan'):
-    """
-    Fungsi helper untuk analisis cepat
-    
-    Parameters:
-    file_path (str): Path ke file Excel
-    company_name (str): Nama perusahaan
-    sheet_name (int/str): Sheet yang akan dianalisis  
-    metric_column (str): Nama kolom metric
-    """
+def analyze_company(file_path, company_name, sheet_name=0, metric_column='Keterangan'):
     analyzer = IDXFinancialAnalyzer(file_path, company_name)
-    return analyzer.run_full_analysis(file_path, sheet_name, metric_column)
+    analyzer.load_data(sheet_name)
+    analyzer.preview_data()
+    analyzer.standardize_data(metric_column)
+    analyzer.calculate_financial_ratios()
+    analyzer.create_visualizations()
+    analyzer.generate_report()
 
-# ===== CONTOH PENGGUNAAN =====
+# Streamlit App
+def main():
+    st.set_page_config(
+        page_title="IDX Financial Analyzer",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    st.title("📈 IDX Financial Statement Analyzer")
+    st.markdown("""
+    **Menganalisis laporan keuangan perusahaan IDX**  
+    Unggah file Excel laporan keuangan format IDX untuk memulai analisis
+    """)
+    
+    with st.sidebar:
+        st.header("Pengaturan Analisis")
+        uploaded_file = st.file_uploader("Unggah file Excel", type=["xlsx", "xls"])
+        company_name = st.text_input("Nama Perusahaan (opsional)")
+        sheet_name = st.text_input("Nama Sheet (default: 0)", value="0")
+        metric_column = st.text_input("Kolom Metrik (default: Keterangan)", value="Keterangan")
+        analyze_btn = st.button("Mulai Analisis", type="primary")
+    
+    if uploaded_file and analyze_btn:
+        with st.spinner("Memproses data..."):
+            # Save uploaded file to temp location
+            with open("temp_file.xlsx", "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            # Run analysis
+            analyze_company(
+                "temp_file.xlsx",
+                company_name or uploaded_file.name.split('.')[0],
+                sheet_name=int(sheet_name) if sheet_name.isdigit() else sheet_name,
+                metric_column
+            )
+    
+    st.sidebar.markdown("---")
+    st.sidebar.info("""
+    **Panduan Penggunaan:**
+    1. Unggah file Excel laporan keuangan format IDX
+    2. Sesuaikan pengaturan analisis jika diperlukan
+    3. Klik tombol 'Mulai Analisis'
+    4. Hasil akan ditampilkan di halaman utama
+    """)
 
-"""
-# Contoh 1: Analisis langsung
-file_path = "ADRO_financial.xlsx"
-analyze_company(file_path, "PT Adaro Energy", sheet_name=0)
-
-# Contoh 2: Analisis manual step-by-step
-analyzer = IDXFinancialAnalyzer("BBCA_financial.xlsx", "Bank BCA")
-analyzer.load_data(sheet_name="Laporan Keuangan")
-analyzer.preview_data()
-analyzer.standardize_data(metric_column="Keterangan")
-analyzer.calculate_financial_ratios()
-analyzer.create_visualizations()
-analyzer.generate_report()
-
-# Contoh 3: Multiple companies analysis
-companies = [
-    ("BBRI_financial.xlsx", "Bank BRI"),
-    ("TLKM_financial.xlsx", "Telkom Indonesia"), 
-    ("UNVR_financial.xlsx", "Unilever Indonesia")
-]
-
-for file_path, company_name in companies:
-    print(f"\n{'='*60}")
-    print(f"Analyzing: {company_name}")
-    print(f"{'='*60}")
-    analyze_company(file_path, company_name)
-"""
+if __name__ == "__main__":
+    main()
