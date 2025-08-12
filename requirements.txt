@@ -1,7 +1,11 @@
-streamlit>=1.20
-pandas>=1.5
+streamlit
+pandas
 numpy
 plotly
 yfinance
 openpyxl
-xlrd  # note: for some .xls files you may need xlrd<2.0; if issues occur, install xlrd==1.2.0
+xlrd 
+matplotlib
+io
+base64
+seaborn
