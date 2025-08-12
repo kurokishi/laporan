@@ -1,5 +1,7 @@
 pandas
-openpyxl
+numpy
 streamlit
 plotly
-numpy
+openpyxl
+camelot-py
+ghostscript
